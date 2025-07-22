@@ -140,13 +140,29 @@
                 </div>
                 
                 <div>
-                    <input type="tel" id="phone" name="phone" placeholder="Phone Number" 
-                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200">
+                    <!-- Phone is now a required field based on the new API spec -->
+                    <input type="tel" id="phone" name="phone" placeholder="Phone Number*" 
+                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200" required>
                 </div>
                 
                 <div>
                     <input type="text" id="companyName" name="companyName" placeholder="Company Name" 
                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200">
+                </div>
+
+                <!-- New field: Company Size -->
+                <div>
+                    <select id="companySize" name="companySize" 
+                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200 bg-white">
+                        <option value="">Select Company Size</option>
+                        <option value="1-10">1-10 employees</option>
+                        <option value="11-50">11-50 employees</option>
+                        <option value="51-200">51-200 employees</option>
+                        <option value="201-500">201-500 employees</option>
+                        <option value="501-1000">501-1000 employees</option>
+                        <option value="1001-5000">1001-5000 employees</option>
+                        <option value="5000+">5000+ employees</option>
+                    </select>
                 </div>
                 
                 <div>
@@ -178,7 +194,8 @@
                 </div>
                 
                 <div>
-                    <input type="number" id="value" name="value" placeholder="Expected Budget (USD)" 
+                    <!-- Value is now a string type based on the new API spec -->
+                    <input type="text" id="value" name="value" placeholder="Expected Budget (USD)" 
                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200">
                 </div>
                 
@@ -189,7 +206,7 @@
                 
                 <div>
                     <input type="url" id="website" name="website" placeholder="Company Website (Optional)" 
-                           class="w-full px-4 py-3 border-2 border-200 rounded-lg focus:border-blue-500 transition-all duration-200">
+                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200">
                 </div>
                 
                 <button type="submit" id="submitButton"
@@ -275,6 +292,7 @@
                             }
                             break;
                         case 'phone':
+                            // Phone is now required, so check for value first
                             // Relaxed phone pattern to allow more formats, but still basic validation
                             const phonePattern = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
                             if (!phonePattern.test(value)) {
@@ -304,6 +322,7 @@
                             }
                             break;
                         case 'value':
+                            // Value is now a string, but still represents a number, so keep numeric validation
                             if (isNaN(value) || parseFloat(value) < 0) {
                                 isValid = false;
                                 errorMessage = 'Please enter a valid positive number';
@@ -376,7 +395,6 @@
                     const leadData = this.prepareLeadData();
                     console.log('Attempting to submit lead data:', leadData);
 
-                    // Directly attempt the API submission
                     const response = await fetch(LEADSPARE_CONFIG.endpoint, {
                         method: 'POST',
                         headers: {
@@ -421,21 +439,28 @@
                     firstName: formData.get('firstName'),
                     lastName: formData.get('lastName'),
                     email: formData.get('email'),
-                    phone: formData.get('phone') || undefined,
+                    // Phone is now required
+                    phone: formData.get('phone'), 
                     companyName: formData.get('companyName') || undefined,
+                    // New field: companySize
+                    companySize: formData.get('companySize') || undefined,
                     title: formData.get('title') || undefined,
                     designation: formData.get('designation') || undefined,
                     notes: formData.get('notes') || undefined,
                     source: "HR Automation Website - TalentTrack", // Hardcoded source
-                    value: formData.get('value') ? parseFloat(formData.get('value')) : undefined,
+                    // Value is now a string, no parseFloat needed
+                    value: formData.get('value') || undefined, 
                     linkedin: formData.get('linkedin') || undefined,
                     website: formData.get('website') || undefined
                 };
 
-                // Remove undefined or empty string values to avoid sending empty fields
+                // Remove undefined or empty string values (except for required fields which are handled by validation)
                 Object.keys(leadData).forEach(key => {
                     if (leadData[key] === undefined || leadData[key] === '') {
-                        delete leadData[key];
+                        // Keep required fields even if empty, as validation handles them
+                        if (key !== 'firstName' && key !== 'lastName' && key !== 'email' && key !== 'phone') {
+                            delete leadData[key];
+                        }
                     }
                 });
 
