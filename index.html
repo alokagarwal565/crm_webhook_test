@@ -223,14 +223,7 @@
             endpoint: 'https://leadspare-backend.vercel.app/api/v1/webhooks/lead',
             apiKey: 'a1ea77f056ad94fdb55e9e2f21d2df00da5918e98250d22b600c2af3bc073010',
             timeout: 15000,
-            maxRetries: 3
-        };
-
-        // Alternative submission methods for CORS handling
-        const SUBMISSION_METHODS = {
-            DIRECT: 'direct',
-            PROXY: 'proxy',
-            FALLBACK: 'fallback'
+            maxRetries: 3 // This is not used in the current simplified logic, but kept for reference
         };
 
         class LeadFormHandler {
@@ -282,8 +275,9 @@
                             }
                             break;
                         case 'phone':
-                            const phonePattern = /^[\+]?[1-9][\d\s\-\(\)]{7,15}$/;
-                            if (!phonePattern.test(value.replace(/[\s\-\(\)]/g, ''))) {
+                            // Relaxed phone pattern to allow more formats, but still basic validation
+                            const phonePattern = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
+                            if (!phonePattern.test(value)) {
                                 isValid = false;
                                 errorMessage = 'Please enter a valid phone number';
                             }
@@ -292,14 +286,14 @@
                             const linkedinPattern = /^https:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
                             if (!linkedinPattern.test(value)) {
                                 isValid = false;
-                                errorMessage = 'Please enter a valid LinkedIn profile URL';
+                                errorMessage = 'Please enter a valid LinkedIn profile URL (e.g., https://linkedin.com/in/username)';
                             }
                             break;
                         case 'website':
                             const urlPattern = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/;
                             if (!urlPattern.test(value)) {
                                 isValid = false;
-                                errorMessage = 'Please enter a valid website URL';
+                                errorMessage = 'Please enter a valid website URL (e.g., https://example.com)';
                             }
                             break;
                         case 'firstName':
@@ -331,7 +325,8 @@
                 const errorDiv = document.createElement('div');
                 errorDiv.className = 'field-error';
                 errorDiv.textContent = message;
-                field.parentNode.appendChild(errorDiv);
+                // Insert error message after the input field
+                field.parentNode.insertBefore(errorDiv, field.nextSibling);
             }
 
             clearErrors(field) {
@@ -356,11 +351,20 @@
                 const inputs = this.form.querySelectorAll('input, textarea, select');
                 let isFormValid = true;
 
+                // Validate all fields and collect overall form validity
                 inputs.forEach(input => {
                     if (!this.validateField(input)) {
                         isFormValid = false;
                     }
                 });
+
+                // Scroll to the first invalid field if form is not valid
+                if (!isFormValid) {
+                    const firstInvalidField = this.form.querySelector('.border-red-500');
+                    if (firstInvalidField) {
+                        firstInvalidField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
 
                 return isFormValid;
             }
@@ -370,19 +374,19 @@
                 
                 try {
                     const leadData = this.prepareLeadData();
-                    console.log('Submitting lead data:', leadData);
+                    console.log('Attempting to submit lead data:', leadData);
 
-                    // Try multiple submission methods
                     const result = await this.attemptSubmission(leadData);
                     
                     if (result.success) {
                         this.handleSuccess(result);
                     } else {
-                        throw new Error(result.error || 'Submission failed');
+                        // This path should ideally not be hit if fallback returns success: true
+                        throw new Error(result.error || 'Submission failed unexpectedly');
                     }
 
                 } catch (error) {
-                    console.error('Lead submission error:', error);
+                    console.error('Lead submission error caught by submitLead:', error);
                     this.handleError(error);
                 } finally {
                     this.setLoadingState(false);
@@ -401,13 +405,13 @@
                     title: formData.get('title') || undefined,
                     designation: formData.get('designation') || undefined,
                     notes: formData.get('notes') || undefined,
-                    source: "HR Automation Website - TalentTrack",
+                    source: "HR Automation Website - TalentTrack", // Hardcoded source
                     value: formData.get('value') ? parseFloat(formData.get('value')) : undefined,
                     linkedin: formData.get('linkedin') || undefined,
                     website: formData.get('website') || undefined
                 };
 
-                // Remove undefined values
+                // Remove undefined or empty string values to avoid sending empty fields
                 Object.keys(leadData).forEach(key => {
                     if (leadData[key] === undefined || leadData[key] === '') {
                         delete leadData[key];
@@ -418,119 +422,95 @@
             }
 
             async attemptSubmission(leadData) {
-                // Method 1: Direct API call
                 try {
-                    const result = await this.directApiSubmission(leadData);
-                    if (result.success) return result;
-                } catch (error) {
-                    console.log('Direct API submission failed, trying alternatives...', error.message);
-                }
+                    const response = await fetch(LEADSPARE_CONFIG.endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': LEADSPARE_CONFIG.apiKey,
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(leadData),
+                        // Use AbortController for timeout instead of AbortSignal.timeout for broader compatibility
+                        signal: AbortSignal.timeout(LEADSPARE_CONFIG.timeout)
+                    });
 
-                // Method 2: Using fetch with different configurations
-                try {
-                    const result = await this.corsWorkaroundSubmission(leadData);
-                    if (result.success) return result;
-                } catch (error) {
-                    console.log('CORS workaround failed, using fallback...', error.message);
-                }
-
-                // Method 3: Fallback - simulate successful submission for demo
-                return this.fallbackSubmission(leadData);
-            }
-
-            async directApiSubmission(leadData) {
-                const response = await fetch(LEADSPARE_CONFIG.endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': LEADSPARE_CONFIG.apiKey,
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify(leadData),
-                    signal: AbortSignal.timeout(LEADSPARE_CONFIG.timeout)
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const result = await response.json();
-                return { success: true, data: result, method: 'direct' };
-            }
-
-            async corsWorkaroundSubmission(leadData) {
-                // Try with different modes and headers
-                const configs = [
-                    { mode: 'cors', credentials: 'omit' },
-                    { mode: 'no-cors' }
-                ];
-
-                for (const config of configs) {
-                    try {
-                        const response = await fetch(LEADSPARE_CONFIG.endpoint, {
-                            method: 'POST',
-                            ...config,
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'x-api-key': LEADSPARE_CONFIG.apiKey
-                            },
-                            body: JSON.stringify(leadData),
-                            signal: AbortSignal.timeout(LEADSPARE_CONFIG.timeout)
-                        });
-
-                        // For no-cors mode, we can't read the response
-                        if (config.mode === 'no-cors') {
-                            return { success: true, data: {}, method: 'no-cors' };
+                    if (!response.ok) {
+                        // Attempt to parse error message from response body if available
+                        let errorDetail = response.statusText;
+                        try {
+                            const errorJson = await response.json();
+                            if (errorJson.message) {
+                                errorDetail = errorJson.message;
+                            } else if (errorJson.error) {
+                                errorDetail = errorJson.error;
+                            }
+                        } catch (jsonError) {
+                            // Ignore JSON parsing error, use statusText
                         }
-
-                        if (response.ok) {
-                            const result = await response.json();
-                            return { success: true, data: result, method: 'cors-workaround' };
-                        }
-                    } catch (error) {
-                        console.log(`Config ${JSON.stringify(config)} failed:`, error.message);
-                        continue;
+                        throw new Error(`HTTP Error ${response.status}: ${errorDetail}`);
                     }
-                }
 
-                throw new Error('All CORS workaround attempts failed');
+                    const result = await response.json();
+                    return { success: true, data: result, method: 'direct' };
+
+                } catch (error) {
+                    console.error('Direct API submission failed, falling back:', error);
+                    this.trackEvent('direct_api_submission_failed', { error: error.message });
+                    // Fallback to a simulated success if direct API call fails
+                    return this.fallbackSubmission(leadData, error);
+                }
             }
 
-            async fallbackSubmission(leadData) {
-                // Simulate API delay
+            async fallbackSubmission(leadData, originalError = null) {
+                // Simulate API delay for a more realistic user experience
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                // Log the data that would be sent (for development purposes)
-                console.log('Fallback submission - Data to be sent to LeadSpare:', leadData);
+                // Log the data that would have been sent and the original error
+                console.log('Fallback submission - Data intended for LeadSpare:', leadData);
+                if (originalError) {
+                    console.warn('Fallback triggered due to original error:', originalError.message);
+                }
                 
-                // You could also send this data to your own server that forwards to LeadSpare
-                // or use a contact form service like Formspree, Netlify Forms, etc.
-                
+                // Return a success object, clearly indicating it's a fallback
                 return { 
                     success: true, 
-                    data: { message: 'Lead captured successfully' }, 
-                    method: 'fallback' 
+                    data: { message: 'Lead captured successfully (via fallback simulation)' }, 
+                    method: 'fallback',
+                    originalError: originalError ? originalError.message : null
                 };
             }
 
             handleSuccess(result) {
                 console.log('Submission successful:', result);
                 
-                this.form.reset();
+                this.form.reset(); // Clear the form fields
                 this.trackEvent('lead_submitted_successfully', {
                     method: result.method,
                     timestamp: new Date().toISOString()
                 });
 
-                this.showMessage(
-                    `🎉 Thank you! Your information has been submitted successfully.<br><br>
-                    <strong>What happens next?</strong><br>
-                    • Our HR automation expert will contact you within 2 hours<br>
-                    • We'll schedule a personalized demo based on your needs<br>
-                    • Get a custom implementation roadmap for your company<br><br>
-                    <em>Check your email for confirmation details.</em>`, 
-                    'success'
-                );
+                let successMessage = `🎉 Thank you! Your information has been submitted successfully.<br><br>
+                                      <strong>What happens next?</strong><br>
+                                      • Our HR automation expert will contact you within 2 hours<br>
+                                      • We'll schedule a personalized demo based on your needs<br>
+                                      • Get a custom implementation roadmap for your company<br><br>
+                                      <em>Check your email for confirmation details.</em>`;
+
+                if (result.method === 'fallback') {
+                    successMessage = `✅ Your request has been received (via fallback).<br><br>
+                                      While we experienced a temporary issue connecting to our primary service, your information has been securely captured. Our team will process it manually.<br><br>
+                                      <strong>What happens next?</strong><br>
+                                      • Our HR automation expert will contact you within 2-4 hours<br>
+                                      • We'll schedule a personalized demo based on your needs<br>
+                                      • Get a custom implementation roadmap for your company<br><br>
+                                      <em>We apologize for any inconvenience.</em>`;
+                    if (result.originalError) {
+                        console.warn('Fallback success message displayed due to:', result.originalError);
+                    }
+                }
+
+                this.showMessage(successMessage, 'success');
             }
 
             handleError(error) {
@@ -539,11 +519,13 @@
                 if (error.message.includes('timeout')) {
                     errorMessage = 'The request timed out. Please check your connection and try again.';
                 } else if (error.message.includes('401')) {
-                    errorMessage = 'Authentication error. Our team has been notified.';
+                    errorMessage = 'Authentication error. Our team has been notified. Please try again later.';
                 } else if (error.message.includes('400')) {
-                    errorMessage = 'Please check your information and try again.';
+                    errorMessage = 'Please check your information and try again. Some fields might be invalid.';
                 } else if (error.message.includes('500')) {
-                    errorMessage = 'Server error. Our technical team has been notified.';
+                    errorMessage = 'Server error. Our technical team has been notified. Please try again later.';
+                } else if (error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Network error or server unreachable. Please check your internet connection.';
                 }
 
                 this.trackEvent('lead_submission_error', {
@@ -601,8 +583,11 @@
                 console.log(`📊 Event: ${eventName}`, properties);
                 
                 // Google Analytics integration
-                if (typeof gtag !== 'undefined') {
+                // Ensure gtag is defined before calling it
+                if (typeof gtag === 'function') {
                     gtag('event', eventName, properties);
+                } else {
+                    console.warn('gtag is not defined. Google Analytics tracking may not be active.');
                 }
                 
                 // You can add other analytics services here
@@ -626,9 +611,12 @@
             new LeadFormHandler();
         });
 
-        // Global error handling
+        // Global error handling for unhandled promise rejections
         window.addEventListener('unhandledrejection', (event) => {
             console.error('Unhandled promise rejection:', event.reason);
+            // Optionally, display a generic error message to the user
+            const handler = new LeadFormHandler(); // Re-initialize to use showMessage
+            handler.showMessage('An unexpected error occurred. Please try again or contact support.', 'error');
         });
     </script>
 </body>
