@@ -189,7 +189,7 @@
                 
                 <div>
                     <input type="url" id="website" name="website" placeholder="Company Website (Optional)" 
-                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 transition-all duration-200">
+                           class="w-full px-4 py-3 border-2 border-200 rounded-lg focus:border-blue-500 transition-all duration-200">
                 </div>
                 
                 <button type="submit" id="submitButton"
@@ -376,17 +376,38 @@
                     const leadData = this.prepareLeadData();
                     console.log('Attempting to submit lead data:', leadData);
 
-                    const result = await this.attemptSubmission(leadData);
-                    
-                    if (result.success) {
-                        this.handleSuccess(result);
-                    } else {
-                        // This path should ideally not be hit if fallback returns success: true
-                        throw new Error(result.error || 'Submission failed unexpectedly');
+                    // Directly attempt the API submission
+                    const response = await fetch(LEADSPARE_CONFIG.endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': LEADSPARE_CONFIG.apiKey,
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(leadData),
+                        signal: AbortSignal.timeout(LEADSPARE_CONFIG.timeout)
+                    });
+
+                    if (!response.ok) {
+                        let errorDetail = response.statusText;
+                        try {
+                            const errorJson = await response.json();
+                            if (errorJson.message) {
+                                errorDetail = errorJson.message;
+                            } else if (errorJson.error) {
+                                errorDetail = errorJson.error;
+                            }
+                        } catch (jsonError) {
+                            // Ignore JSON parsing error, use statusText
+                        }
+                        throw new Error(`HTTP Error ${response.status}: ${errorDetail}`);
                     }
 
+                    const result = await response.json();
+                    this.handleSuccess({ success: true, data: result, method: 'direct' });
+
                 } catch (error) {
-                    console.error('Lead submission error caught by submitLead:', error);
+                    console.error('Lead submission error:', error);
                     this.handleError(error);
                 } finally {
                     this.setLoadingState(false);
@@ -420,67 +441,7 @@
 
                 return leadData;
             }
-
-            async attemptSubmission(leadData) {
-                try {
-                    const response = await fetch(LEADSPARE_CONFIG.endpoint, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-api-key': LEADSPARE_CONFIG.apiKey,
-                            'Accept': 'application/json'
-                        },
-                        body: JSON.stringify(leadData),
-                        // Use AbortController for timeout instead of AbortSignal.timeout for broader compatibility
-                        signal: AbortSignal.timeout(LEADSPARE_CONFIG.timeout)
-                    });
-
-                    if (!response.ok) {
-                        // Attempt to parse error message from response body if available
-                        let errorDetail = response.statusText;
-                        try {
-                            const errorJson = await response.json();
-                            if (errorJson.message) {
-                                errorDetail = errorJson.message;
-                            } else if (errorJson.error) {
-                                errorDetail = errorJson.error;
-                            }
-                        } catch (jsonError) {
-                            // Ignore JSON parsing error, use statusText
-                        }
-                        throw new Error(`HTTP Error ${response.status}: ${errorDetail}`);
-                    }
-
-                    const result = await response.json();
-                    return { success: true, data: result, method: 'direct' };
-
-                } catch (error) {
-                    console.error('Direct API submission failed, falling back:', error);
-                    this.trackEvent('direct_api_submission_failed', { error: error.message });
-                    // Fallback to a simulated success if direct API call fails
-                    return this.fallbackSubmission(leadData, error);
-                }
-            }
-
-            async fallbackSubmission(leadData, originalError = null) {
-                // Simulate API delay for a more realistic user experience
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Log the data that would have been sent and the original error
-                console.log('Fallback submission - Data intended for LeadSpare:', leadData);
-                if (originalError) {
-                    console.warn('Fallback triggered due to original error:', originalError.message);
-                }
-                
-                // Return a success object, clearly indicating it's a fallback
-                return { 
-                    success: true, 
-                    data: { message: 'Lead captured successfully (via fallback simulation)' }, 
-                    method: 'fallback',
-                    originalError: originalError ? originalError.message : null
-                };
-            }
-
+            
             handleSuccess(result) {
                 console.log('Submission successful:', result);
                 
@@ -497,19 +458,6 @@
                                       • Get a custom implementation roadmap for your company<br><br>
                                       <em>Check your email for confirmation details.</em>`;
 
-                if (result.method === 'fallback') {
-                    successMessage = `✅ Your request has been received (via fallback).<br><br>
-                                      While we experienced a temporary issue connecting to our primary service, your information has been securely captured. Our team will process it manually.<br><br>
-                                      <strong>What happens next?</strong><br>
-                                      • Our HR automation expert will contact you within 2-4 hours<br>
-                                      • We'll schedule a personalized demo based on your needs<br>
-                                      • Get a custom implementation roadmap for your company<br><br>
-                                      <em>We apologize for any inconvenience.</em>`;
-                    if (result.originalError) {
-                        console.warn('Fallback success message displayed due to:', result.originalError);
-                    }
-                }
-
                 this.showMessage(successMessage, 'success');
             }
 
@@ -519,7 +467,7 @@
                 if (error.message.includes('timeout')) {
                     errorMessage = 'The request timed out. Please check your connection and try again.';
                 } else if (error.message.includes('401')) {
-                    errorMessage = 'Authentication error. Our team has been notified. Please try again later.';
+                    errorMessage = 'Authentication error. Please ensure your API key is correct or contact support.';
                 } else if (error.message.includes('400')) {
                     errorMessage = 'Please check your information and try again. Some fields might be invalid.';
                 } else if (error.message.includes('500')) {
